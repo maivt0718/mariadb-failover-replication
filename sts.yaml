@@ -1,0 +1,101 @@
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb-sts
+spec:
+  serviceName: "mariadb-service"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      initContainers:
+      - name: init-mariadb
+        image: mariadb
+        imagePullPolicy: Always
+        command:
+        - bash
+        - "-c"
+        - |
+          set -ex
+          echo 'Starting init-mariadb';
+
+          ls /mnt/config-map
+          
+          [[ `hostname` =~ -([0-9]+)$ ]] || exit 1
+          ordinal=${BASH_REMATCH[1]}
+          
+          # Copy appropriate conf.d files from config-map to 
+          # mariadb-config volume (emptyDir) depending on pod number
+
+          cp /mnt/config-map/config.cnf /etc/mysql/mariadb.conf.d/50-server.cnf
+
+          if [[ $ordinal -eq 2 ]]; then
+            # This file holds SQL for connecting to primary
+            # Create the users needed for replication on primary on a volume
+            # initdb (emptyDir)
+            cp /mnt/config-map/primary.sql /docker-entrypoint-initdb.d
+          else
+            # This file holds SQL for connecting to slave
+            # On replicas use slave configuration on initdb volume
+            cp /mnt/config-map/slave.sql /docker-entrypoint-initdb.d
+          fi
+          # Add an offset to avoid reserved server-id=0 value.
+          echo server-id=$((3000 + $ordinal)) >> /etc/mysql/mariadb.conf.d/50-server.cnf
+          echo report_host=$(hostname) >> /etc/mysql/mariadb.conf.d/50-server.cnf
+          cp -r /etc/mysql/mariadb.conf.d/* /etc/mysql/conf.d/ 
+          ls /etc/mysql/mariadb.conf.d/
+          cat /etc/mysql/mariadb.conf.d/50-server.cnf
+        volumeMounts:
+          - name: mariadb-configmap
+            mountPath: /mnt/config-map
+          - name: mariadb-config
+            mountPath: /etc/mysql/conf.d/
+          - name: initdb
+            mountPath: /docker-entrypoint-initdb.d
+      restartPolicy: Always
+
+      containers:
+      - name: mariadb
+        image: mariadb
+        ports:
+        - containerPort: 3306
+          name: mariadb-port
+        env:
+        # Using Secrets
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom: 
+            secretKeyRef: 
+              name: mariadb-secret 
+              key: MARIADB_ROOT_PASSWORD 
+        - name: MYSQL_INITDB_SKIP_TZINFO
+          value: "1"
+        volumeMounts:
+        - name: datadir
+          mountPath: /var/lib/mysql/
+        - name: mariadb-config
+          mountPath: /etc/mysql/mariadb.conf.d/
+        - name: initdb
+          mountPath: /docker-entrypoint-initdb.d
+
+      volumes:
+      - name: mariadb-config # mount with /etc/mysql/conf.d/
+        emptyDir: {}
+      - name: initdb
+        emptyDir: {}
+      - name: mariadb-configmap # mount with /mnt/config-map
+        configMap:
+          name: mariadb-configmap
+  volumeClaimTemplates:
+  - metadata:
+      name: datadir
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 300M

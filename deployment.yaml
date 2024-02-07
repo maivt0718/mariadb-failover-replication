@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb-maxscale
+spec:
+  selector:
+    matchLabels:
+      app: mariadb-maxscale
+  template:
+    metadata:
+      labels:
+        app: mariadb-maxscale
+    spec:
+      initContainers:
+      - name: mariadb-maxscale-init
+        image: mariadb/maxscale:latest
+        command: 
+        - bash
+        - "-c"
+        - |
+          cp /mnt/mariadb-maxscale-configmap/maxscale.cnf /etc/maxscale.cnf
+          cp -r /etc/* /mnt/etc/
+          cat /etc/maxscale.cnf
+        volumeMounts:
+          - name: mariadb-maxscale-etc
+            mountPath: /mnt/etc/
+          - name: mariadb-maxscale-configmap
+            mountPath: /mnt/mariadb-maxscale-configmap/
+      containers:
+      - name: mariadb-maxscale
+        image: mariadb/maxscale:latest
+        volumeMounts:
+          - name: mariadb-maxscale-etc
+            mountPath: /etc/
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 3306
+
+      volumes:
+      - name: mariadb-maxscale-configmap 
+        configMap:
+          name: mariadb-maxscale
+      - name: mariadb-maxscale-etc
+        emptyDir: {}

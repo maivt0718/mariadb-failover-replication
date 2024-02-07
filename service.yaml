@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-service
+  labels:
+    app: mariadb-svc
+spec:
+  ports:
+  - port: 3306
+    name: mariadb-port
+  clusterIP: None
+  selector:
+    app: mariadb
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-service-lb-rw
+spec:
+  selector:
+    app: mariadb-maxscale
+  type: LoadBalancer
+  ports:
+  - port: 3306
+    targetPort: 3306
+
